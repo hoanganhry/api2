@@ -158,12 +158,33 @@ function safeLoadJSON(file, defaultValue = []) {
 function safeSaveJSON(file, data) {
   try {
     const tempFile = file + '.tmp';
-    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tempFile, file);
+    const payload = JSON.stringify(data, null, 2);
+    fs.writeFileSync(tempFile, payload, 'utf8');
+    try {
+      fs.renameSync(tempFile, file);
+    } catch (renameErr) {
+      // If rename fails (Windows file locks, cross-device, etc.), try a direct write as fallback
+      try {
+        fs.writeFileSync(file, payload, 'utf8');
+        // Cleanup temp file if it still exists
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+      } catch (writeErr) {
+        console.error(`❌ Error renaming ${tempFile} -> ${file}:`, renameErr);
+        console.error(`❌ Error writing directly to ${file}:`, writeErr);
+        return false;
+      }
+    }
     return true;
   } catch(err) {
-    console.error(`❌ Error saving ${file}:`, err);
-    return false;
+    console.error(`❌ Error saving ${file}:`, err && err.stack ? err.stack : err);
+    // Last-resort attempt
+    try {
+      fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+      return true;
+    } catch(e) {
+      console.error(`❌ Fallback write also failed for ${file}:`, e && e.stack ? e.stack : e);
+      return false;
+    }
   }
 }
 
@@ -374,35 +395,7 @@ function checkMaintenance(req, res, next) {
 
 app.use(checkMaintenance);
 
-/* ================= ADMIN LOGIN ================= */
-app.post('/api/admin-login', async (req, res) => {
-  try {
-    const { username, password } = req.body || {};
-    const cfg = loadConfig();
-
-    if (username !== cfg.admin.username) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    const ok = await bcrypt.compare(password, cfg.admin.passwordHash);
-    if (!ok) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign(
-      { username: cfg.admin.username, role: 'admin', iat: Date.now() },
-      JWT_SECRET,
-      { expiresIn: '12h' }
-    );
-
-    logActivity('admin_login', 'admin', 'admin', { ip: req.ip });
-
-    res.json({ success: true, token, role: 'admin' });
-  } catch(err) {
-    console.error('Admin login error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
+/* ================= ADMIN LOGIN (removed) ================= */
 
 /* ================= USER REGISTRATION (NO EMAIL VALIDATION) ================= */
 app.post('/api/register', async (req, res) => {
@@ -499,72 +492,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-/* ================= USER LOGIN ================= */
-app.post('/api/login', async (req, res) => {
-  try {
-    const { username, password } = req.body || {};
-    
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ thông tin' });
-    }
-
-    const users = loadUsers();
-    const user = users.find(u => u.username === username);
-
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng' });
-    }
-
-    if (user.isBanned) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Tài khoản đã bị khóa.' 
-      });
-    }
-
-    if (!user.isActive) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Tài khoản đã bị tạm khóa.' 
-      });
-    }
-
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không đúng' });
-    }
-
-    user.lastLogin = getFullDateTime();
-    saveUsers(users);
-
-    const token = jwt.sign(
-      { 
-        userId: user.id,
-        username: user.username, 
-        role: user.role,
-        iat: Date.now() 
-      },
-      JWT_SECRET,
-      { expiresIn: '12h' }
-    );
-
-    logActivity('login', user.id, username, { ip: req.ip });
-
-    res.json({ 
-      success: true, 
-      token,
-      user: {
-        username: user.username,
-        email: user.email,
-        keyCount: user.keyCount,
-        apiCode: user.apiCode
-      }
-    });
-  } catch(err) {
-    console.error('Login error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
+/* ================= USER LOGIN (removed) ================= */
 
 /* ================= CREATE KEY (ENHANCED với Custom Key) ================= */
 app.post('/api/create-key', requireAuth, (req, res) => {
@@ -1672,5 +1600,5 @@ process.on('SIGINT', () => {
     console.log('Server closed');
     process.exit(0);
   });
-
 });
+
