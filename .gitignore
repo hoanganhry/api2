@@ -1,0 +1,11 @@
+node_modules/
+*.log
+.env
+.DS_Store
+*.tmp
+backups/
+keys.json
+users.json
+devices.json
+activity_logs.json
+config.json
